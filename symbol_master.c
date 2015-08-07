@@ -1,14 +1,14 @@
 #include <windows.h>
-#include "buffer.h"
+#include "dbghelp.h"
 #include "ollydbg/plugin.h"
+#include "buffer.h"
 
-#define DEF_NAME         "Symbol Loader"
+#define DEF_NAME         "Symbol Control"
 #define DEF_VERSION      "1.0"
 #define DEF_COPYRIGHT    "Copyright (C) 2015 RaMMicHaeL"
 
 HINSTANCE hInst;
 HWND hOllyWnd;
-BOOL bAutoLoadSymbols;
 
 BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
 {
@@ -29,51 +29,71 @@ BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
 
 BOOL InitPatchProcess()
 {
-	// Skip SymSetSearchPath
+	char szSearchPath[256];
+	BOOL bUndecoratedSymbols;
+	BOOL bAutoLoadSymbols;
 
-	// 004911EC | EB 2E              JMP SHORT OLLYDBG.0049121C
-	if(!PatchMemory((void *)0x004911EC, "\xEB", 1))
+	Pluginreadstringfromini(hInst, "search_path", szSearchPath, "SRV*.\\Symbols*http://msdl.microsoft.com/download/symbols");
+	bUndecoratedSymbols = Pluginreadintfromini(hInst, "undecorated_symbols", TRUE);
+	bAutoLoadSymbols = Pluginreadintfromini(hInst, "auto_load_symbols", TRUE);
+
+	// Write back to have the defaults if values are missing
+	Pluginwritestringtoini(hInst, "search_path", szSearchPath);
+	Pluginwriteinttoini(hInst, "undecorated_symbols", bUndecoratedSymbols != FALSE);
+	Pluginwriteinttoini(hInst, "auto_load_symbols", bAutoLoadSymbols != FALSE);
+
+	// Search path
+	//
+	// 0049120C | 68 78563412       PUSH 12345678
+	// 00491211 | 90                NOP
+	// 00491212 | 90                NOP
+
+	BYTE bSearchPathPatch[] = "\x68\x78\x56\x34\x12\x90\x90";
+	*(char **)(bSearchPathPatch + 1) = szSearchPath;
+
+	if(!PatchMemory((void *)0x0049120C, bSearchPathPatch, 7))
 	{
 		return FALSE;
 	}
 
-	// SymSetOptions: 0x00001210 -> 0x00000213
+	// Correct options + undecorated symbols
+	//
+	// 00491107 | 81CA 10120000      OR EDX,1210
 
-	// 00491107 | 81CA 13020000      OR EDX,213
-	if(!PatchMemory((void *)0x00491109, "\x13\x02", 2))
+	DWORD dwSymOptions = SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_LOAD_LINES;
+	if(bUndecoratedSymbols)
+		dwSymOptions |= SYMOPT_UNDNAME;
+
+	if(!PatchMemory((void *)0x00491109, &bUndecoratedSymbols, sizeof(DWORD)))
 	{
 		return FALSE;
+	}
+
+	// Auto load disable
+	//
+	// 0045DC91 | E8 8A490300       CALL OLLYDBG.00492620
+
+	if(!bAutoLoadSymbols)
+	{
+		char *pPatchNoAutoLoad = "\x90\x90\x90\x90\x90";
+
+		if(!PatchMemory((void *)0x0045DC91, pPatchNoAutoLoad, 5))
+		{
+			return FALSE;
+		}
 	}
 
 	return TRUE;
-}
-
-BOOL ApplyAutoLoadConfig(BOOL bNewAutoLoadConfig)
-{
-	char *pPatchData;
-	if(bNewAutoLoadConfig)
-		pPatchData = "\xE8\x8A\x49\x03\x00";
-	else
-		pPatchData = "\x90\x90\x90\x90\x90";
-
-	return PatchMemory((void *)0x0045DC91, pPatchData, 5);
-}
-
-BOOL ReadAutoLoadConfig()
-{
-	return Pluginreadintfromini(hInst, "auto_load_symbols", FALSE);
-}
-
-void ChangeAutoLoadConfig(BOOL bNewAutoLoadConfig)
-{
-	Pluginwriteinttoini(hInst, "auto_load_symbols", bNewAutoLoadConfig);
 }
 
 void LoadCurrentModuleSymbols()
 {
 	if(Getstatus() == STAT_NONE)
 	{
-		Flash("No process is loaded");
+		char *pMessage = "no process is loaded";
+
+		Flash("%s", pMessage);
+		Addtolist(0, 0, DEF_NAME ": %s", pMessage);
 		return;
 	}
 
@@ -83,8 +103,11 @@ void LoadCurrentModuleSymbols()
 	t_module *pModule = Findmodule(dwBase);
 	if(!pModule)
 	{
-		Flash("Could not find module on address %p", dwBase);
-		Addtolist(0, 0, "Could not find module on address %p", dwBase);
+		char szMessage[64];
+		wsprintf(szMessage, "could not find module on address %p", dwBase);
+
+		Flash("%s", szMessage);
+		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
 		return;
 	}
 
@@ -94,8 +117,24 @@ void LoadCurrentModuleSymbols()
 	int result = ((int(__cdecl *)(t_module *, size_t, char *))0x00492620)(pModule, 0, pModule->path);
 	Redrawdisassembler();
 
-	Flash("Symbols loading completed, result: %d", result);
-	Addtolist(0, 0, "Symbols loading completed, result: %d", result);
+	char szMessage[64];
+	switch(result)
+	{
+	case 0:
+		lstrcpy(szMessage, "symbols were successfully loaded");
+		break;
+
+	case -1:
+		lstrcpy(szMessage, "no symbols were loaded");
+		break;
+
+	default:
+		wsprintf(szMessage, "unexpected return value: %d", result);
+		break;
+	}
+
+	Flash("%s", szMessage);
+	Addtolist(0, 0, DEF_NAME ": %s", szMessage);
 }
 
 BOOL APIENTRY main(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
@@ -149,11 +188,9 @@ extc int _export cdecl ODBG_Plugininit(int ollydbgversion, HWND hWnd, ulong *fea
 	// The first, in black, should describe plugin, the second, gray and indented
 	// by two characters, bears copyright notice.
 	Addtolist(0, 0, DEF_NAME " v" DEF_VERSION);
-	Addtolist(0, -1, DEF_COPYRIGHT);
+	Addtolist(0, -1, "  " DEF_COPYRIGHT);
 
-	bAutoLoadSymbols = ReadAutoLoadConfig();
-
-	if(!InitPatchProcess() || !ApplyAutoLoadConfig(bAutoLoadSymbols))
+	if(!InitPatchProcess())
 	{
 		Addtolist(0, 1, DEF_NAME ": something went wrong!");
 	}
@@ -180,11 +217,7 @@ extc int _export cdecl ODBG_Pluginmenu(int origin, char data[4096], void *item)
 	switch(origin)
 	{
 	case PM_MAIN: // Plugin menu in main window
-		lstrcpy(data, 
-			"0 &Load current module symbols\tCtrl+Shift+D|"
-			"1 A&uto load symbols,"
-			"2 &Don't auto load symbols|"
-			"3 &About");
+		lstrcpy(data, "0 &Load current module symbols\tCtrl+Shift+D|1 &About");
 		// If your plugin is more than trivial, I also recommend to include Help.
 		return 1;
 	}
@@ -207,17 +240,6 @@ extc void _export cdecl ODBG_Pluginaction(int origin, int action, void *item)
 			break;
 
 		case 1:
-		case 2:
-			bAutoLoadSymbols = (action == 1);
-			ChangeAutoLoadConfig(bAutoLoadSymbols);
-
-			if(!ApplyAutoLoadConfig(bAutoLoadSymbols))
-			{
-				Addtolist(0, 1, DEF_NAME ": something went wrong!");
-			}
-			break;
-
-		case 3:
 			// Menu item "About", displays plugin info. If you write your own code,
 			// please replace with own copyright!
 			MessageBox(
