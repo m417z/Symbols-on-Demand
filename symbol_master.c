@@ -116,19 +116,23 @@ void LoadCurrentModuleSymbols()
 	int result = ((int(__cdecl *)(t_module *, size_t, char *))0x00492620)(pModule, 0, pModule->path);
 	Redrawdisassembler();
 
+	char szModuleName[SHORTLEN + 1];
+	CopyMemory(szModuleName, pModule->name, SHORTLEN);
+	szModuleName[SHORTLEN] = '\0';
+
 	char szMessage[64];
 	switch(result)
 	{
 	case 0:
-		lstrcpy(szMessage, "Symbols were successfully loaded");
+		wsprintf(szMessage, "Symbols were successfully loaded for %s", szModuleName);
 		break;
 
 	case -1:
-		lstrcpy(szMessage, "No symbols were loaded");
+		wsprintf(szMessage, "No symbols were loaded for %s", szModuleName);
 		break;
 
 	default:
-		wsprintf(szMessage, "Unexpected return value: %d", result);
+		wsprintf(szMessage, "Unexpected return value (%d) for %s", result, szModuleName);
 		break;
 	}
 
