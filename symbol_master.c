@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "buffer.h"
 #include "ollydbg/plugin.h"
 
 #define DEF_NAME         "Symbol Loader"
@@ -9,15 +10,29 @@ HINSTANCE hInst;
 HWND hOllyWnd;
 BOOL bAutoLoadSymbols;
 
+BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
+{
+	DWORD dwOldProtect;
+	if(VirtualProtect(pDest, nSize, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+	{
+		CopyMemory(pDest, pSrc, nSize);
+
+		DWORD dwOtherProtect;
+		if(VirtualProtect(pDest, nSize, dwOldProtect, &dwOtherProtect))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 BOOL InitPatchProcess()
 {
-	DWORD dwNumberOfBytesWritten;
-
 	// Skip SymSetSearchPath
 
 	// 004911EC | EB 2E              JMP SHORT OLLYDBG.0049121C
-	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x004911EC, "\xEB", 1, &dwNumberOfBytesWritten) ||
-		dwNumberOfBytesWritten != 1)
+	if(!PatchMemory((void *)0x004911EC, "\xEB", 1))
 	{
 		return FALSE;
 	}
@@ -25,8 +40,7 @@ BOOL InitPatchProcess()
 	// SymSetOptions: 0x00001210 -> 0x00000213
 
 	// 00491107 | 81CA 13020000      OR EDX,213
-	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x00491109, "\x13\x02", 2, &dwNumberOfBytesWritten) ||
-		dwNumberOfBytesWritten != 2)
+	if(!PatchMemory((void *)0x00491109, "\x13\x02", 2))
 	{
 		return FALSE;
 	}
@@ -42,11 +56,7 @@ BOOL ApplyAutoLoadConfig(BOOL bNewAutoLoadConfig)
 	else
 		pPatchData = "\x90\x90\x90\x90\x90";
 
-	DWORD dwNumberOfBytesWritten;
-	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x0045DC91, pPatchData, 5, &dwNumberOfBytesWritten))
-		return FALSE;
-
-	return dwNumberOfBytesWritten == 5;
+	return PatchMemory((void *)0x0045DC91, pPatchData, 5);
 }
 
 BOOL ReadAutoLoadConfig()
@@ -88,12 +98,13 @@ void LoadCurrentModuleSymbols()
 	Addtolist(0, 0, "Symbols loading completed, result: %d", result);
 }
 
-BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY main(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
 	switch(ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
 		hInst = (HINSTANCE)hModule;
+		DisableThreadLibraryCalls(hModule);
 		break;
 
 	case DLL_PROCESS_DETACH:
