@@ -13,16 +13,20 @@ BOOL InitPatchProcess()
 {
 	DWORD dwNumberOfBytesWritten;
 
-	// 004911EC  \. / EB 2E         JMP SHORT OLLYDBG_dbg_sym.0049121C
+	// Skip SymSetSearchPath
+
+	// 004911EC | EB 2E              JMP SHORT OLLYDBG.0049121C
 	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x004911EC, "\xEB", 1, &dwNumberOfBytesWritten) ||
 		dwNumberOfBytesWritten != 1)
 	{
 		return FALSE;
 	}
 
-	// 00491107 | > \81CA 37020380 OR EDX, 80030237
-	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x00491109, "\x37\x02\x03\x80", 4, &dwNumberOfBytesWritten) ||
-		dwNumberOfBytesWritten != 4)
+	// SymSetOptions: 0x00001210 -> 0x00000213
+
+	// 00491107 | 81CA 13020000      OR EDX,213
+	if(!WriteProcessMemory(GetCurrentProcess(), (void *)0x00491109, "\x13\x02", 2, &dwNumberOfBytesWritten) ||
+		dwNumberOfBytesWritten != 2)
 	{
 		return FALSE;
 	}
@@ -70,13 +74,18 @@ void LoadCurrentModuleSymbols()
 	if(!pModule)
 	{
 		Flash("Could not find module on address %p", dwBase);
+		Addtolist(0, 0, "Could not find module on address %p", dwBase);
 		return;
 	}
+
+	// Second argument it the file offset for the Debug directory.
+	// I'm not sure what advantages does it provide, though.
 
 	int result = ((int(__cdecl *)(t_module *, size_t, char *))0x00492620)(pModule, 0, pModule->path);
 	Redrawdisassembler();
 
 	Flash("Symbols loading completed, result: %d", result);
+	Addtolist(0, 0, "Symbols loading completed, result: %d", result);
 }
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
