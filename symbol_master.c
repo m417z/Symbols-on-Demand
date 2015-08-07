@@ -140,7 +140,7 @@ void LoadCurrentModuleSymbols()
 	Addtolist(0, 0, DEF_NAME ": %s", szMessage);
 }
 
-BOOL APIENTRY main(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
 	switch(ul_reason_for_call)
 	{
