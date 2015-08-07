@@ -9,6 +9,9 @@
 
 HINSTANCE hInst;
 HWND hOllyWnd;
+char szSearchPath[256];
+BOOL bUndecoratedSymbols;
+BOOL bAutoLoadSymbols;
 
 BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
 {
@@ -29,10 +32,6 @@ BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
 
 BOOL InitPatchProcess()
 {
-	char szSearchPath[256];
-	BOOL bUndecoratedSymbols;
-	BOOL bAutoLoadSymbols;
-
 	Pluginreadstringfromini(hInst, "search_path", szSearchPath, "SRV*.\\Symbols*http://msdl.microsoft.com/download/symbols");
 	bUndecoratedSymbols = Pluginreadintfromini(hInst, "undecorated_symbols", TRUE);
 	bAutoLoadSymbols = Pluginreadintfromini(hInst, "auto_load_symbols", TRUE);
@@ -90,7 +89,7 @@ void LoadCurrentModuleSymbols()
 {
 	if(Getstatus() == STAT_NONE)
 	{
-		char *pMessage = "no process is loaded";
+		char *pMessage = "No process is loaded";
 
 		Flash("%s", pMessage);
 		Addtolist(0, 0, DEF_NAME ": %s", pMessage);
@@ -104,7 +103,7 @@ void LoadCurrentModuleSymbols()
 	if(!pModule)
 	{
 		char szMessage[64];
-		wsprintf(szMessage, "could not find module on address %p", dwBase);
+		wsprintf(szMessage, "Could not find module on address %p", dwBase);
 
 		Flash("%s", szMessage);
 		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
@@ -121,15 +120,15 @@ void LoadCurrentModuleSymbols()
 	switch(result)
 	{
 	case 0:
-		lstrcpy(szMessage, "symbols were successfully loaded");
+		lstrcpy(szMessage, "Symbols were successfully loaded");
 		break;
 
 	case -1:
-		lstrcpy(szMessage, "no symbols were loaded");
+		lstrcpy(szMessage, "No symbols were loaded");
 		break;
 
 	default:
-		wsprintf(szMessage, "unexpected return value: %d", result);
+		wsprintf(szMessage, "Unexpected return value: %d", result);
 		break;
 	}
 
@@ -192,7 +191,7 @@ extc int _export cdecl ODBG_Plugininit(int ollydbgversion, HWND hWnd, ulong *fea
 
 	if(!InitPatchProcess())
 	{
-		Addtolist(0, 1, DEF_NAME ": something went wrong!");
+		Addtolist(0, 1, DEF_NAME ": Something went wrong!");
 	}
 
 	return 0;
