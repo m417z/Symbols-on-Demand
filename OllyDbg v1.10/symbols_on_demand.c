@@ -3,7 +3,7 @@
 #include "ollydbg/plugin.h"
 #include "buffer.h"
 
-#define DEF_NAME         "Symbol Control"
+#define DEF_NAME         "Symbols on Demand"
 #define DEF_VERSION      "1.0"
 #define DEF_COPYRIGHT    "Copyright (C) 2015 RaMMicHaeL"
 
@@ -11,7 +11,7 @@ HINSTANCE hInst;
 HWND hOllyWnd;
 char szSearchPath[256];
 BOOL bUndecoratedSymbols;
-BOOL bAutoLoadSymbols;
+BOOL bDisableAutoLoadSymbols;
 
 BOOL PatchMemory(void *pDest, void *pSrc, size_t nSize)
 {
@@ -34,12 +34,12 @@ BOOL InitPatchProcess()
 {
 	Pluginreadstringfromini(hInst, "search_path", szSearchPath, "SRV*.\\Symbols*http://msdl.microsoft.com/download/symbols");
 	bUndecoratedSymbols = Pluginreadintfromini(hInst, "undecorated_symbols", TRUE);
-	bAutoLoadSymbols = Pluginreadintfromini(hInst, "auto_load_symbols", TRUE);
+	bDisableAutoLoadSymbols = Pluginreadintfromini(hInst, "disable_auto_load_symbols", TRUE);
 
 	// Write back to have the defaults if values are missing
 	Pluginwritestringtoini(hInst, "search_path", szSearchPath);
 	Pluginwriteinttoini(hInst, "undecorated_symbols", bUndecoratedSymbols != FALSE);
-	Pluginwriteinttoini(hInst, "auto_load_symbols", bAutoLoadSymbols != FALSE);
+	Pluginwriteinttoini(hInst, "disable_auto_load_symbols", bDisableAutoLoadSymbols != FALSE);
 
 	// Search path
 	//
@@ -63,7 +63,7 @@ BOOL InitPatchProcess()
 	if(bUndecoratedSymbols)
 		dwSymOptions |= SYMOPT_UNDNAME;
 
-	if(!PatchMemory((void *)0x00491109, &bUndecoratedSymbols, sizeof(DWORD)))
+	if(!PatchMemory((void *)0x00491109, &dwSymOptions, sizeof(DWORD)))
 	{
 		return FALSE;
 	}
@@ -72,7 +72,7 @@ BOOL InitPatchProcess()
 	//
 	// 0045DC91 | E8 8A490300       CALL OLLYDBG.00492620
 
-	if(!bAutoLoadSymbols)
+	if(bDisableAutoLoadSymbols)
 	{
 		char *pPatchNoAutoLoad = "\x90\x90\x90\x90\x90";
 
@@ -110,15 +110,25 @@ void LoadCurrentModuleSymbols()
 		return;
 	}
 
+	char szModuleName[SHORTLEN + 1];
+	CopyMemory(szModuleName, pModule->name, SHORTLEN);
+	szModuleName[SHORTLEN] = '\0';
+
+	if(pModule->dbghelpsym)
+	{
+		char szMessage[64];
+		wsprintf(szMessage, "Symbols were already loaded for %s", szModuleName);
+
+		Flash("%s", szMessage);
+		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
+		return;
+	}
+
 	// Second argument it the file offset for the Debug directory.
 	// I'm not sure what advantages does it provide, though.
 
 	int result = ((int(__cdecl *)(t_module *, size_t, char *))0x00492620)(pModule, 0, pModule->path);
 	Redrawdisassembler();
-
-	char szModuleName[SHORTLEN + 1];
-	CopyMemory(szModuleName, pModule->name, SHORTLEN);
-	szModuleName[SHORTLEN] = '\0';
 
 	char szMessage[64];
 	switch(result)
@@ -135,6 +145,66 @@ void LoadCurrentModuleSymbols()
 		wsprintf(szMessage, "Unexpected return value (%d) for %s", result, szModuleName);
 		break;
 	}
+
+	Flash("%s", szMessage);
+	Addtolist(0, 0, DEF_NAME ": %s", szMessage);
+}
+
+void ClearCurrentModuleSymbols()
+{
+	if(Getstatus() == STAT_NONE)
+	{
+		char *pMessage = "No process is loaded";
+
+		Flash("%s", pMessage);
+		Addtolist(0, 0, DEF_NAME ": %s", pMessage);
+		return;
+	}
+
+	DWORD dwBase, dwSize;
+	Getdisassemblerrange(&dwBase, &dwSize);
+
+	t_module *pModule = Findmodule(dwBase);
+	if(!pModule)
+	{
+		char szMessage[64];
+		wsprintf(szMessage, "Could not find module on address %p", dwBase);
+
+		Flash("%s", szMessage);
+		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
+		return;
+	}
+
+	Deletenamerange(pModule->base, pModule->base + pModule->size, NM_LIBRARY);
+
+	if(pModule->dbghelpsym)
+	{
+		((void(__cdecl *)(t_module *))0x00491C5C)(pModule);
+
+		HMODULE hDbgHelp = *(HMODULE *)0x004D5A00;
+		if(hDbgHelp)
+		{
+			typedef BOOL(WINAPI *SymUnloadModuleType)(HANDLE hProcess, DWORD BaseOfDll);
+
+			SymUnloadModuleType pSymUnloadModule = (SymUnloadModuleType)GetProcAddress(hDbgHelp, "SymUnloadModule");
+			if(pSymUnloadModule)
+			{
+				if(pSymUnloadModule(*(HANDLE *)0x004D5A78, pModule->base))
+				{
+					pModule->dbghelpsym = 0;
+				}
+			}
+		}
+	}
+
+	Redrawdisassembler();
+
+	char szModuleName[SHORTLEN + 1];
+	CopyMemory(szModuleName, pModule->name, SHORTLEN);
+	szModuleName[SHORTLEN] = '\0';
+
+	char szMessage[64];
+	wsprintf(szMessage, "Symbols were successfully cleared for %s", szModuleName);
 
 	Flash("%s", szMessage);
 	Addtolist(0, 0, DEF_NAME ": %s", szMessage);
@@ -220,7 +290,7 @@ extc int _export cdecl ODBG_Pluginmenu(int origin, char data[4096], void *item)
 	switch(origin)
 	{
 	case PM_MAIN: // Plugin menu in main window
-		lstrcpy(data, "0 &Load current module symbols\tCtrl+Shift+D|1 &About");
+		lstrcpy(data, "0 &Load current module symbols\tCtrl+Shift+D,1 &Clear current module symbols|2 &About");
 		// If your plugin is more than trivial, I also recommend to include Help.
 		return 1;
 	}
@@ -238,11 +308,14 @@ extc void _export cdecl ODBG_Pluginaction(int origin, int action, void *item)
 		switch(action)
 		{
 		case 0:
-			// Menu item, main plugin functionality
 			LoadCurrentModuleSymbols();
 			break;
 
 		case 1:
+			ClearCurrentModuleSymbols();
+			break;
+
+		case 2:
 			// Menu item "About", displays plugin info. If you write your own code,
 			// please replace with own copyright!
 			MessageBox(

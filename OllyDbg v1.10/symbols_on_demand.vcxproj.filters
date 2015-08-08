@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="symbol_master.c">
+    <ClCompile Include="symbols_on_demand.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
