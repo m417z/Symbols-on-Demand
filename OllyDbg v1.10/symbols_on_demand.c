@@ -103,7 +103,7 @@ void LoadCurrentModuleSymbols()
 	if(!pModule)
 	{
 		char szMessage[64];
-		wsprintf(szMessage, "Could not find module on address %p", dwBase);
+		wsprintf(szMessage, "Could not find module on address %08X", dwBase);
 
 		Flash("%s", szMessage);
 		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
@@ -168,7 +168,7 @@ void ClearCurrentModuleSymbols()
 	if(!pModule)
 	{
 		char szMessage[64];
-		wsprintf(szMessage, "Could not find module on address %p", dwBase);
+		wsprintf(szMessage, "Could not find module on address %08X", dwBase);
 
 		Flash("%s", szMessage);
 		Addtolist(0, 0, DEF_NAME ": %s", szMessage);
