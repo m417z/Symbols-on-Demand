@@ -179,7 +179,7 @@ void ClearCurrentModuleSymbols()
 	Addtolist(0, 0, DEF_NAME L": %s", szMessage);
 }
 
-static int MainMenuFunc(t_table *pt, wchar_t *name, ulong index, int mode);
+static int __cdecl MainMenuFunc(t_table *pt, wchar_t *name, ulong index, int mode);
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
@@ -301,7 +301,7 @@ extc void __cdecl ODBG2_Plugindestroy(void)
 }
 */
 
-static int MainMenuFunc(t_table *pt, wchar_t *name, ulong index, int mode)
+static int __cdecl MainMenuFunc(t_table *pt, wchar_t *name, ulong index, int mode)
 {
 	switch(mode)
 	{
